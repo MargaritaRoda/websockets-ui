@@ -1,3 +1,4 @@
+import WebSocket from "ws";
 import {
   AddShipsRequestRequest,
   AddUserToRoomRequest,
@@ -26,6 +27,7 @@ import {
   getUserWinners,
   incrementUserWinCount,
 } from "./state";
+import { bot, botTable, generateRandomAttackPosition } from "./types/bot";
 
 function regSuccessResponse(user: User): CommandResponse {
   return {
@@ -236,6 +238,21 @@ export const requestHandler = (
           startGameResponse(room.game.activeUserId, data.ships),
           clients
         );
+        //==============================================================================
+        if (room.game.user1Id === bot.id) {
+          room.game.attack(
+            generateRandomAttackPosition().x,
+            generateRandomAttackPosition().y
+          );
+          const client = allClients.filter(
+            (client) => client.index === room.user2Id
+          );
+          sendResponse(
+            startGameResponse(room.game.activeUserId, data.ships),
+            client
+          );
+        }
+        //===================================================================================
       }
 
       break;
@@ -290,6 +307,22 @@ export const requestHandler = (
         ),
         clients
       );
+      //====================================================
+      if (room.game.user1Id === bot.id) {
+        const client = allClients.filter(
+          (client) => client.index === game.user2Id
+        );
+
+        sendResponse(
+          attackStatusResponse(
+            shotPosition,
+            data.indexPlayer,
+            attackResult.status
+          ),
+          client
+        );
+      }
+      //=========================================================================================
 
       switch (attackResult.status) {
         case AttackStatus.killed: {
@@ -318,9 +351,82 @@ export const requestHandler = (
         }
         case AttackStatus.miss: {
           sendResponse(turnResponse(game.activeUserId), clients);
+
+          //====================================
+          if (room.game.user1Id === bot.id) {
+            const client = allClients.filter(
+              (client) => client.index === game.user2Id
+            );
+
+            sendResponse(turnResponse(game.activeUserId), client);
+
+            const attackResult = game.attack(
+              generateRandomAttackPosition().x,
+              generateRandomAttackPosition().y
+            );
+            switch (attackResult.status) {
+              case "miss": {
+                sendResponse(turnResponse(game.activeUserId), client);
+                break;
+              }
+              case "shot": {
+                game.attack(
+                  generateRandomAttackPosition().x,
+                  generateRandomAttackPosition().y
+                );
+                break;
+              }
+              case "killed": {
+                for (const position of attackResult.missPositions) {
+                  sendResponse(
+                    attackStatusResponse(
+                      position,
+                      data.indexPlayer,
+                      AttackStatus.miss
+                    ),
+                    client
+                  );
+                }
+                const humanClients = allClients.filter(
+                  (c) => c.index !== bot.id
+                );
+
+                if (game.isFinished) {
+                  sendResponse(finishResponse(data.indexPlayer), client);
+                  incrementUserWinCount(bot.id);
+                  sendUpdateWinners(humanClients);
+                  deleteRoomById(room.id);
+                  sendUpdateRooms(humanClients);
+                }
+                break;
+              }
+            }
+          }
+          //=====================================================
+
           break;
         }
       }
+      break;
+    }
+    case CommandType.SINGLE_PLAY: {
+      const user = createUser(bot.id, bot.name, bot.password);
+      sendResponse(regSuccessResponse(user), [wsClient]);
+      const room = createRoom(user.id);
+
+      addSecondUserToRoom(room.id, wsClient.index);
+
+      sendResponse(createGameResponse(room.id, wsClient.index), [wsClient]);
+
+      // Add bot ships
+      room.game.addUserTable(
+        bot.id,
+        botTable as AddShipsRequestRequest["ships"]
+      );
+
+      // Start the game by sending the first turn to the player
+      sendResponse(turnResponse(wsClient.index), [wsClient]);
+
       break;
     }
 

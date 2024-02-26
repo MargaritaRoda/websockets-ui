@@ -17,6 +17,7 @@ export enum CommandType {
   ADD_SHIPS = "add_ships",
   RANDOM_ATTACK = "randomAttack",
   ADD_USER_TO_ROOM = "add_user_to_room",
+  SINGLE_PLAY = "single_play",
 }
 
 export interface Command {
